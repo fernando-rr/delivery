@@ -1,0 +1,24 @@
+# Ignorar pastas dos projetos
+backend/
+frontend/
+
+# Arquivos do sistema
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Node modules (caso tenha algum script no projeto principal)
+node_modules/
+
+# Arquivos temporários
+*.tmp
+*.temp
