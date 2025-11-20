@@ -1,24 +1,19 @@
-# Ignorar pastas dos projetos
-backend/
-frontend/
+# Environment
+.env
+.env.*
+!.env.example
 
-# Arquivos do sistema
+# OS
 .DS_Store
 Thumbs.db
 
-# Logs
-*.log
-
-# IDE
-.vscode/
+# IDEs
 .idea/
+.vscode/
 *.swp
 *.swo
-*~
 
-# Node modules (caso tenha algum script no projeto principal)
-node_modules/
-
-# Arquivos temporários
-*.tmp
-*.temp
+# Subprojects
+backend/
+frontend/
+infra/

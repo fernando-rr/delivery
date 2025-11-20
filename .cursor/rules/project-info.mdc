@@ -1,0 +1,274 @@
+---
+alwaysApply: true
+---
+
+# Delivery Platform - Informações do Projeto
+
+## Visão Geral
+
+Plataforma SaaS de delivery multi-tenant onde cada restaurante possui seu próprio banco de dados isolado.
+
+## Arquitetura
+
+### Multi-tenant Strategy: DB por Restaurante
+
+**Central DB:** `delivery_central`
+- `restaurants` - cadastro de restaurantes
+- `plans` - planos disponíveis
+- `subscriptions` - assinaturas dos restaurantes
+- `subscription_invoices` - faturas mensais
+- Campo `restaurants.db_name` define qual DB do tenant (ex: `tenant_42`)
+
+**Tenant DBs:** `tenant_{restaurant_id}`
+- `products` - produtos do cardápio
+- `menus` / `menu_items` - organização do cardápio
+- `customers` - clientes do restaurante
+- `orders` - pedidos
+- `order_items` - itens dos pedidos
+- `order_invoices` - faturas dos pedidos
+- `settings` - configurações do restaurante
+
+### Dynamic Database Connection
+
+```php
+// Middleware IdentifyTenant
+$tenant = Restaurant::where('slug', $slug)->first();
+config(['database.connections.tenant.database' => $tenant->db_name]);
+DB::purge('tenant');
+DB::reconnect('tenant');
+```
+
+### Provisionar Novo Tenant
+
+```php
+// 1. Criar registro no central
+$restaurant = Restaurant::create([...]);
+
+// 2. Gerar nome do DB
+$dbName = "tenant_{$restaurant->id}";
+
+// 3. Criar database
+DB::statement("CREATE DATABASE `{$dbName}` CHARACTER SET utf8mb4");
+
+// 4. Conectar e rodar migrations
+config(['database.connections.tenant.database' => $dbName]);
+DB::purge('tenant');
+DB::reconnect('tenant');
+Artisan::call('migrate', [
+    '--database' => 'tenant',
+    '--path' => 'database/migrations/tenant'
+]);
+```
+
+## Stack Tecnológica
+
+### Backend
+- **Laravel 12** (PHP 8.3)
+- **MySQL 8.0** (central + múltiplos tenant DBs)
+- **Redis 7.0** (cache + filas)
+- **Laravel Sanctum** (autenticação API)
+- **Laravel Horizon** (monitor de filas)
+
+### Frontend
+- **Nuxt 3.14** (SSR/SPA)
+- **Vue 3.5** + Composition API
+- **TypeScript 5.5**
+- **Tailwind CSS 3.4**
+- **Pinia 2.1** (state management)
+
+### DevOps
+- **Docker** + **Docker Compose**
+- **Nginx** (web server)
+- **Traefik** (reverse proxy - futuro)
+
+## URLs e Roteamento
+
+### Desenvolvimento
+- **Frontend:** http://delivery.local
+- **API:** http://delivery.local/api
+- **Backend direto:** http://localhost:8080
+- **Frontend direto:** http://localhost:3000
+
+### Identificação de Tenant
+- Header `X-Tenant-Id` (pedidos públicos)
+- Subdomínio (futuro): `restaurante.delivery.com`
+
+## Endpoints Principais
+
+### Central API (Sistema SaaS)
+```
+POST   /api/central/restaurants      # Criar restaurante + provisionar DB
+GET    /api/central/restaurants      # Listar restaurantes
+GET    /api/central/plans            # Listar planos
+POST   /api/central/subscriptions    # Criar assinatura
+GET    /api/central/invoices         # Faturas de assinaturas
+```
+
+### Tenant API (Por Restaurante)
+```
+# Produtos
+GET    /api/products
+POST   /api/products
+PUT    /api/products/{id}
+
+# Pedidos
+GET    /api/orders
+POST   /api/orders              # Público (criar pedido)
+GET    /api/orders/{id}
+PATCH  /api/orders/{id}/status
+
+# Clientes
+GET    /api/customers
+POST   /api/customers
+
+# Cardápio
+GET    /api/menus
+```
+
+## Fluxo de Pedido
+
+1. Cliente acessa site do restaurante (Nuxt)
+2. Cria pedido via `POST /api/orders` (tenant API)
+3. API identifica tenant e conecta ao DB correto
+4. Salva pedido no DB do tenant
+5. Dispara job para notificação (Redis queue)
+6. Restaurante vê pedido no painel admin
+
+## Jobs Assíncronos (Redis Queue)
+
+- `CreateOrderInvoiceJob` - gera fatura do pedido
+- `SendSmsJob` - envia SMS para cliente
+- `ProcessPaymentJob` - processa webhook de pagamento
+- `GeneratePdfJob` - gera PDF de nota fiscal
+
+## Autenticação
+
+### Sanctum (SPA)
+- Frontend faz login via `/api/login`
+- Recebe token (cookie httpOnly)
+- Envia token em requests subsequentes
+- Middleware `auth:sanctum` protege rotas
+
+### Stateful Domains
+```env
+SANCTUM_STATEFUL_DOMAINS=delivery.local,localhost:3000
+```
+
+## Variáveis de Ambiente
+
+### Backend (.env)
+```env
+DB_CONNECTION=mysql
+DB_HOST=mysql                    # Container name
+DB_DATABASE=delivery_central
+
+TENANT_DB_CONNECTION=mysql
+TENANT_DB_HOST=mysql
+
+REDIS_HOST=redis                 # Container name
+QUEUE_CONNECTION=redis
+CACHE_STORE=redis
+
+SANCTUM_STATEFUL_DOMAINS=delivery.local
+```
+
+### Frontend (.env)
+```env
+NUXT_PUBLIC_API_BASE=http://delivery.local/api
+```
+
+## Docker
+
+### Backend Services
+- `app` - PHP 8.3-FPM (Laravel)
+- `nginx` - Web server
+- `mysql` - MySQL 8.0
+- `redis` - Redis 7.0
+
+### Frontend Services
+- `nuxt` - Node 20 (Nuxt dev server)
+
+### Volumes
+- `mysql-data` - Dados do MySQL (persistente)
+- `redis-data` - Dados do Redis (persistente)
+
+## Migrations
+
+### Central
+```bash
+cd backend
+make artisan cmd="migrate --path=database/migrations/central"
+```
+
+### Tenant (manual)
+```bash
+# Conectar ao DB do tenant e rodar
+make artisan cmd="migrate --database=tenant --path=database/migrations/tenant"
+```
+
+### Tenant (automático via service)
+```php
+TenantService::provisionTenant($restaurant);
+// Cria DB + roda migrations automaticamente
+```
+
+## Roadmap Implementação
+
+### Fase 1 - Core Central
+- [ ] Migrations: restaurants, plans, subscriptions
+- [ ] CRUD de Planos
+- [ ] CRUD de Restaurantes
+- [ ] Endpoint provisionar tenant (criar DB + migrations)
+
+### Fase 2 - Tenant Baseline
+- [ ] Migrations: products, menus, customers, orders
+- [ ] Middleware IdentifyTenant
+- [ ] API de Produtos
+- [ ] API de Pedidos (público)
+
+### Fase 3 - Frontend MVP
+- [ ] Página pública de pedido
+- [ ] Painel admin restaurante
+- [ ] Lista de pedidos
+- [ ] Atualização de status
+
+### Fase 4 - Billing
+- [ ] Geração de order_invoices
+- [ ] Geração de subscription_invoices
+- [ ] PDF de faturas
+
+### Fase 5 - Notificações
+- [ ] Jobs assíncronos
+- [ ] Integração SMS (Twilio/Zenvia)
+- [ ] In-app notifications
+
+## Comandos Úteis
+
+### Backend
+```bash
+cd backend
+make up                              # Iniciar containers
+make setup                           # Setup completo
+make shell                           # Shell no container
+make artisan cmd="tinker"            # Abrir tinker
+make artisan cmd="migrate"           # Rodar migrations
+make logs                            # Ver logs
+```
+
+### Frontend
+```bash
+cd frontend
+make up                              # Iniciar container
+make install                         # npm install
+make shell                           # Shell no container
+make logs                            # Ver logs
+```
+
+## Notas Importantes
+
+1. **Sempre use `tenant` connection** para dados do restaurante
+2. **Central connection** apenas para metadados (restaurants, plans)
+3. **Cada tenant é isolado** - não há cross-tenant queries
+4. **Provisionar tenant** cria DB + roda migrations automaticamente
+5. **Middleware IdentifyTenant** deve rodar em todas rotas tenant
+6. **Jobs devem saber qual tenant** (passar tenant_id ou db_name)

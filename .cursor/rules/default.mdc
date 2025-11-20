@@ -1,0 +1,244 @@
+---
+alwaysApply: true
+---
+
+# Delivery Platform - Guia de Desenvolvimento
+
+## 🎯 Visão Geral
+
+Plataforma SaaS de delivery multi-tenant onde cada restaurante possui seu próprio banco de dados isolado. Backend Laravel com padrões arquiteturais robustos + Frontend Nuxt 3.
+
+## 📐 Arquitetura Multi-Tenant
+
+### Estratégia: DB por Restaurante
+
+**Central DB:** `delivery_central`
+- Tabelas: `restaurants`, `plans`, `subscriptions`, `subscription_invoices`
+- Campo `restaurants.db_name` define qual DB do tenant (ex: `tenant_42`)
+
+**Tenant DBs:** `tenant_{restaurant_id}`
+- Tabelas: `products`, `menus`, `menu_items`, `customers`, `orders`, `order_items`, `order_invoices`, `settings`
+
+### Dynamic Database Connection
+
+```php
+// Middleware IdentifyTenant
+$tenant = Restaurant::where('slug', $slug)->first();
+config(['database.connections.tenant.database' => $tenant->db_name]);
+DB::purge('tenant');
+DB::reconnect('tenant');
+```
+
+### Provisionar Novo Tenant
+
+```php
+$restaurant = Restaurant::create([...]);
+$dbName = "tenant_{$restaurant->id}";
+
+DB::statement("CREATE DATABASE `{$dbName}` CHARACTER SET utf8mb4");
+
+config(['database.connections.tenant.database' => $dbName]);
+DB::purge('tenant');
+DB::reconnect('tenant');
+Artisan::call('migrate', ['--database' => 'tenant', '--path' => 'database/migrations/tenant']);
+```
+
+## 🛠️ Stack Tecnológica
+
+**Backend:** Laravel 12 (PHP 8.3) • MySQL 8.0 • Redis 7.0 • Sanctum • Horizon  
+**Frontend:** Nuxt 3.14 • Vue 3.5 • TypeScript 5.5 • Tailwind 3.4 • Pinia 2.1  
+**DevOps:** Docker • Docker Compose • Nginx • Traefik
+
+## 🌐 URLs & Identificação
+
+- **Frontend:** http://delivery.local
+- **API:** http://delivery.local/api
+- **Tenant:** Header `X-Tenant-Id` ou Subdomínio (futuro)
+
+## 📦 Padrões Arquiteturais
+
+### 1. DTOs (Data Transfer Objects)
+
+BaseDTO com validação automática, casts customizados e serialização.
+
+**Tipos de DTOs:**
+- **QueryDTO:** Campos `nullable` para consultas
+- **CreateDTO:** Campos `required` para criação
+- **UpdateDTO:** Campos `sometimes|required` para atualização
+- **OperationDTO:** Campos específicos para operações pontuais
+
+```php
+class ProductCreateDTO extends BaseDTO
+{
+    public static function getFillableAttributes(): Collection
+    {
+        return collect([
+            'name' => 'required|string|max:255',
+            'price' => 'required|numeric|min:0',
+            'description' => 'nullable|string',
+            'active' => 'nullable|boolean',
+        ]);
+    }
+}
+```
+
+### 2. Services Layer Pattern
+
+Separação por responsabilidade:
+- **CreatorService:** Criação de entidades
+- **UpdaterService:** Atualização de entidades
+- **DeleterService:** Exclusão de entidades
+- **FinderService:** Busca e consulta de entidades
+
+```php
+class ProductCreatorService extends SaverService
+{
+    public function create(ProductCreateDTO $dto): ProductDTO
+    {
+        return $this->save($dto);
+    }
+
+    protected function saveEntity(array $attributes): BaseDTO
+    {
+        $product = Product::create($attributes);
+        return new ProductDTO($product->toArray());
+    }
+
+    // Hooks: beforeSave(), afterSave(), mapDataToSave()
+}
+```
+
+### 3. Controllers Pattern
+
+Controllers **enxutos** - apenas coordenam:
+1. Recebe requisição
+2. Cria DTO
+3. Chama service
+4. Retorna resposta padronizada
+
+```php
+public function store(Request $request, ProductCreatorService $creatorService): JsonResponse
+{
+    $dto = new ProductCreateDTO($request->all());
+    $product = $creatorService->create($dto);
+    return response()->json($product->toArray(), 201);
+}
+```
+
+**Padrão de Resposta JSON:**
+```json
+{
+    "data": [...],
+    "pagination": {"page": 1, "limit": 20, "total": 100, "totalPages": 5}
+}
+```
+
+### 4. Models
+
+Apenas lógica de persistência e Eloquent:
+- `$fillable` para mass assignment
+- `$hidden` para dados sensíveis
+- `casts()` para conversões
+- Métodos auxiliares simples
+
+### 5. Type Casting System
+
+```php
+// Interface BaseCast
+interface BaseCast {
+    public static function set(mixed $value): mixed;
+    public static function get(mixed $value): mixed;
+}
+
+// Usar no DTO
+protected array $casts = ['date' => DateCast::class];
+```
+
+## 🔗 Fluxo de Requisição
+
+```
+Request → Controller → DTO → Service → Model → Database
+   ↓          ↓          ↓       ↓        ↓        ↓
+POST      Controller   CreateDTO CreatorSvc Model  INSERT
+```
+
+## ✅ Checklist para Novos Recursos
+
+Ao adicionar entidade (ex: `Product`):
+
+1. **DTOs:** ProductDTO, ProductCreateDTO, ProductUpdateDTO
+2. **Services:** ProductCreatorService, ProductUpdaterService, ProductDeleterService, ProductFinderService
+3. **Controller:** ProductController com métodos CRUD
+4. **Model:** Product com `$fillable`, `$hidden`, `casts()`
+5. **Rotas:** Adicionar em `routes/api.php` com middlewares
+6. **Migrations:** Criar tabela com índices e constraints
+
+## 📂 Estrutura de Diretórios
+
+```
+app/
+├── Contracts/DTOs/BaseCast.php
+├── DTOs/
+│   ├── BaseDTO.php
+│   ├── Casts/DateCast.php
+│   └── {Entity}DTO.php (Query, Create, Update)
+├── Http/Controllers/Api/{Entity}Controller.php
+├── Models/{Entity}.php
+└── Services/
+    ├── SaverService/SaverService.php
+    └── {Entity}{Action}Service.php
+```
+
+## 🎯 Princípios SOLID
+
+- **SRP:** Um service = uma responsabilidade
+- **OCP:** BaseDTO e SaverService extensíveis via hooks
+- **LSP:** Subclasses substituem classes base
+- **ISP:** Interfaces pequenas e específicas
+- **DIP:** Injeção de dependência, não instanciação direta
+
+## 🚀 Comandos Úteis
+
+**Backend:**
+```bash
+make up setup shell
+make artisan cmd="migrate --path=database/migrations/central"
+make artisan cmd="migrate --database=tenant --path=database/migrations/tenant"
+```
+
+**Frontend:**
+```bash
+make up install shell logs
+```
+
+## ⚠️ Notas Importantes
+
+1. **Sempre use `tenant` connection** para dados do restaurante
+2. **Central connection** apenas para metadados (restaurants, plans)
+3. **Cada tenant é isolado** - sem cross-tenant queries
+4. **Jobs devem saber qual tenant** (passar tenant_id ou db_name)
+5. **Middleware IdentifyTenant** obrigatório em todas rotas tenant
+
+## 📋 Convenções
+
+**Nomenclatura:**
+- DTOs: `UserCreateDTO`, `UserUpdateDTO`
+- Services: `UserCreatorService`, `UserFinderService`
+- Controllers: `UserController` (organize por contexto: `Api/`, `Admin/`)
+- Models: `User`, `Product` (singular, PascalCase)
+- Métodos Services: `create()`, `update()`, `delete()`, `findById()`, `findAll()`
+- Métodos Controllers: `index()`, `store()`, `show()`, `update()`, `destroy()`
+
+**Respostas HTTP:**
+- Lista: 200 OK + paginação
+- Criação: 201 Created
+- Atualização: 200 OK
+- Deleção: 204 No Content
+
+## 🎯 Vantagens da Arquitetura
+
+✅ **Manutenibilidade:** Código organizado, mudanças isoladas  
+✅ **Testabilidade:** Services testáveis isoladamente, injeção de dependência  
+✅ **Escalabilidade:** Fácil adicionar recursos seguindo padrões  
+✅ **Type Safety:** DTOs garantem tipos e validação automática  
+✅ **Separação de Responsabilidades:** Cada camada com função bem definida
