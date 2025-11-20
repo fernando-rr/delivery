@@ -1,0 +1,92 @@
+version: '3.8'
+
+# Este arquivo pode ser usado como referência no Portainer
+# Em produção, você pode remover o serviço 'traefik' se já estiver rodando separadamente
+
+services:
+  nginx:
+    image: nginx:alpine
+    container_name: delivery_nginx
+    volumes:
+      - /home/projects/delivery_api/docker/nginx/default.conf:/etc/nginx/conf.d/default.conf
+    depends_on:
+      - delivery_api
+    networks:
+      - rinaldi
+    labels:
+      - "traefik.enable=true"
+      # Rotas para API (maior prioridade)
+      - "traefik.http.routers.delivery-api.rule=Host(`${APP_HOST}`) && PathPrefix(`/api`)"
+      - "traefik.http.routers.delivery-api.entrypoints=websecure"
+      - "traefik.http.routers.delivery-api.priority=100"
+      - "traefik.http.routers.delivery-api.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.delivery-api.service=delivery"
+      - "traefik.http.routers.delivery-api-http.rule=Host(`${APP_HOST}`) && PathPrefix(`/api`)"
+      - "traefik.http.routers.delivery-api-http.entrypoints=web"
+      - "traefik.http.routers.delivery-api-http.priority=100"
+      - "traefik.http.routers.delivery-api-http.service=delivery"
+      # Rotas para Web/Front-end (menor prioridade)
+      - "traefik.http.routers.delivery.rule=Host(`${APP_HOST}`)"
+      - "traefik.http.routers.delivery.entrypoints=websecure"
+      - "traefik.http.routers.delivery.priority=10"
+      - "traefik.http.routers.delivery.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.delivery.service=delivery"
+      - "traefik.http.routers.delivery-http.rule=Host(`${APP_HOST}`)"
+      - "traefik.http.routers.delivery-http.entrypoints=web"
+      - "traefik.http.routers.delivery-http.priority=10"
+      - "traefik.http.routers.delivery-http.service=delivery"
+      # Configuração do serviço
+      - "traefik.http.services.delivery.loadbalancer.server.port=80"
+    restart: unless-stopped
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        - APP_ENV=production
+    image: app
+    container_name: delivery_api
+    environment:
+      - APP_ENV=production
+      - APP_DEBUG=false
+      - APP_KEY=${APP_KEY}
+      - DB_HOST=mysql
+      - DB_DATABASE=${DB_DATABASE}
+      - DB_USERNAME=${DB_USERNAME}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - REDIS_HOST=redis
+    depends_on:
+      - mysql
+      - redis
+    networks:
+      - rinaldi
+    restart: unless-stopped
+
+  mysql:
+    image: mysql:8.0
+    container_name: delivery_mysql
+    environment:
+      - MYSQL_DATABASE=${DB_DATABASE}
+      - MYSQL_USER=${DB_USERNAME}
+      - MYSQL_PASSWORD=${DB_PASSWORD}
+      - MYSQL_ROOT_PASSWORD=${DB_ROOT_PASSWORD}
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - rinaldi
+    restart: unless-stopped
+
+  redis:
+    image: redis:alpine
+    container_name: delivery_redis
+    networks:
+      - rinaldi
+    restart: unless-stopped
+
+volumes:
+  mysql_data:
+
+networks:
+  rinaldi:
+    external: true
