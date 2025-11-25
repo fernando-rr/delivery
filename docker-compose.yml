@@ -16,22 +16,25 @@ services:
     labels:
       - "traefik.enable=true"
       # Rotas para API (maior prioridade)
-      - "traefik.http.routers.delivery-api.rule=(Host(`${APP_HOST}`) || HostRegexp(`{subdomain:[a-z0-9-]+}.${APP_HOST}`)) && PathPrefix(`/api`)"
+      # Traefik v3: usa regex pura (sem named groups)
+      # APP_HOST_REGEX deve ter pontos escapados: delivery\\.rinaldi\\.dev\\.br
+      # $$ é necessário para escapar $ no docker-compose
+      - "traefik.http.routers.delivery-api.rule=(Host(`${APP_HOST}`) || HostRegexp(`^[a-z0-9-]+-${APP_HOST_REGEX}$$`)) && PathPrefix(`/api`)"
       - "traefik.http.routers.delivery-api.entrypoints=websecure"
       - "traefik.http.routers.delivery-api.priority=100"
       - "traefik.http.routers.delivery-api.tls.certresolver=letsencrypt"
       - "traefik.http.routers.delivery-api.service=delivery"
-      - "traefik.http.routers.delivery-api-http.rule=(Host(`${APP_HOST}`) || HostRegexp(`{subdomain:[a-z0-9-]+}.${APP_HOST}`)) && PathPrefix(`/api`)"
+      - "traefik.http.routers.delivery-api-http.rule=(Host(`${APP_HOST}`) || HostRegexp(`^[a-z0-9-]+-${APP_HOST_REGEX}$$`)) && PathPrefix(`/api`)"
       - "traefik.http.routers.delivery-api-http.entrypoints=web"
       - "traefik.http.routers.delivery-api-http.priority=100"
       - "traefik.http.routers.delivery-api-http.service=delivery"
       # Rotas para Web/Front-end (menor prioridade)
-      - "traefik.http.routers.delivery.rule=Host(`${APP_HOST}`) || HostRegexp(`{subdomain:[a-z0-9-]+}.${APP_HOST}`)"
+      - "traefik.http.routers.delivery.rule=Host(`${APP_HOST}`) || HostRegexp(`^[a-z0-9-]+-${APP_HOST_REGEX}$$`)"
       - "traefik.http.routers.delivery.entrypoints=websecure"
       - "traefik.http.routers.delivery.priority=10"
       - "traefik.http.routers.delivery.tls.certresolver=letsencrypt"
       - "traefik.http.routers.delivery.service=delivery"
-      - "traefik.http.routers.delivery-http.rule=Host(`${APP_HOST}`) || HostRegexp(`{subdomain:[a-z0-9-]+}.${APP_HOST}`)"
+      - "traefik.http.routers.delivery-http.rule=Host(`${APP_HOST}`) || HostRegexp(`^[a-z0-9-]+-${APP_HOST_REGEX}$$`)"
       - "traefik.http.routers.delivery-http.entrypoints=web"
       - "traefik.http.routers.delivery-http.priority=10"
       - "traefik.http.routers.delivery-http.service=delivery"
