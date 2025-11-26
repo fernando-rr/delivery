@@ -43,12 +43,7 @@ services:
     restart: unless-stopped
 
   app:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        - APP_ENV=production
-    image: app
+    image: registry.gitlab.com/fernandoribeirorinaldi/delivery-api:latest
     container_name: delivery_api
     environment:
       - APP_NAME=DeliveryAPI
